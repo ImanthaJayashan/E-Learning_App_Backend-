@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Eye Scan - Real Time</title>
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body>
+    <div class="container">
+      <h1>Real-time Eye Scan</h1>
+      <div class="video-wrap">
+        <video id="video" autoplay playsinline></video>
+        <canvas id="overlay"></canvas>
+      </div>
+      <div class="controls">
+        <button id="startBtn">Start</button>
+        <button id="stopBtn" disabled>Stop</button>
+        <label>Interval(ms): <input id="interval" type="number" value="600" min="100" step="100"></label>
+      </div>
+      <div id="result">Prediction: <span id="label">-</span> (<span id="conf">-</span>)</div>
+      <div id="log"></div>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
