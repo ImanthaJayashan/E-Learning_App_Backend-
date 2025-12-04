@@ -56,21 +56,94 @@ def train(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Device: {device}")
 
+    # prepare dataloaders and datasets
     train_loader, val_loader, classes = get_dataloaders(args.data_dir, img_size=args.img_size,
                                                       batch_size=args.batch_size, num_workers=args.workers)
+
+    # try to obtain the underlying ImageFolder to compute class distribution
+    train_dataset = None
+    try:
+        # DataLoader.dataset may be a Subset or the dataset itself depending on sampler
+        ds = train_loader.dataset
+        # If it's a Subset, try to get the underlying dataset
+        if hasattr(ds, 'dataset'):
+            train_dataset = ds.dataset
+        else:
+            train_dataset = ds
+    except Exception:
+        train_dataset = None
 
     num_classes = len(classes)
     model = build_model(num_classes, pretrained=not args.no_pretrained)
     model = model.to(device)
 
+    # Setup class weights or sampler if requested
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    if args.use_class_weights and train_dataset is not None:
+        try:
+            import numpy as _np
+            targets = _np.array(train_dataset.targets)
+            counts = _np.bincount(targets, minlength=num_classes)
+            weights = (targets.shape[0] / (counts + 1e-6)).astype('float32')
+            # map per-class weight
+            class_weights = (targets.shape[0] / (counts + 1e-6)).astype('float32')
+            # normalize
+            class_weights = class_weights / class_weights.sum() * num_classes
+            class_weights = torch.tensor(class_weights, dtype=torch.float32).to(device)
+            criterion = nn.CrossEntropyLoss(weight=class_weights)
+            print('Using class weights for loss:', class_weights.cpu().numpy())
+        except Exception as e:
+            print('Failed to compute class weights:', e)
+
+    # Weighted sampler
+    if args.use_weighted_sampler and train_dataset is not None:
+        try:
+            import numpy as _np
+            targets = _np.array(train_dataset.targets)
+            class_sample_count = _np.bincount(targets, minlength=num_classes)
+            weight_per_class = 1.0 / (class_sample_count + 1e-6)
+            weights = weight_per_class[targets]
+            weights = torch.DoubleTensor(weights)
+            from torch.utils.data import WeightedRandomSampler
+            sampler = WeightedRandomSampler(weights, num_samples=len(weights), replacement=True)
+            train_loader = DataLoader(train_dataset, batch_size=args.batch_size, sampler=sampler, num_workers=args.workers)
+            print('Using WeightedRandomSampler for training loader')
+        except Exception as e:
+            print('Failed to create weighted sampler:', e)
+
+    # Freeze backbone for initial epochs if requested
+    if args.freeze_epochs and args.freeze_epochs > 0:
+        for param in model.features.parameters():
+            param.requires_grad = False
+        print(f'Freezing backbone for first {args.freeze_epochs} epochs')
+
+    # Setup optimizer with different LRs optionally
+    if args.freeze_epochs and args.freeze_epochs > 0:
+        optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=args.head_lr)
+    else:
+        # two-group lr: backbone and classifier
+        backbone_params = [p for n, p in model.named_parameters() if 'features' in n]
+        head_params = [p for n, p in model.named_parameters() if 'classifier' in n]
+        optimizer = optim.Adam([
+            {'params': backbone_params, 'lr': args.backbone_lr},
+            {'params': head_params, 'lr': args.head_lr}
+        ])
 
     best_acc = 0.0
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     for epoch in range(1, args.epochs + 1):
+        # if freeze_epochs ended, unfreeze backbone and rebuild optimizer
+        if args.freeze_epochs and epoch == args.freeze_epochs + 1:
+            for param in model.features.parameters():
+                param.requires_grad = True
+            backbone_params = [p for n, p in model.named_parameters() if 'features' in n]
+            head_params = [p for n, p in model.named_parameters() if 'classifier' in n]
+            optimizer = optim.Adam([
+                {'params': backbone_params, 'lr': args.backbone_lr},
+                {'params': head_params, 'lr': args.head_lr}
+            ])
         model.train()
         running_loss = 0.0
         running_corrects = 0
@@ -135,10 +208,15 @@ def parse_args():
     parser.add_argument('--epochs', type=int, default=10)
     parser.add_argument('--batch-size', type=int, default=32)
     parser.add_argument('--lr', type=float, default=1e-4)
+    parser.add_argument('--head-lr', type=float, default=1e-3, help='Learning rate for classifier head')
+    parser.add_argument('--backbone-lr', type=float, default=1e-4, help='Learning rate for backbone when fine-tuning')
     parser.add_argument('--img-size', type=int, default=224)
     parser.add_argument('--output-dir', type=str, default='checkpoints')
     parser.add_argument('--workers', type=int, default=0, help='Number of DataLoader workers (0 for Windows safe)')
     parser.add_argument('--no-pretrained', action='store_true', help='Do not use pretrained weights')
+    parser.add_argument('--use-class-weights', action='store_true', help='Use class weights in CrossEntropyLoss')
+    parser.add_argument('--use-weighted-sampler', action='store_true', help='Use WeightedRandomSampler for training loader')
+    parser.add_argument('--freeze-epochs', type=int, default=0, help='Number of first epochs to freeze backbone and train head only')
     return parser.parse_args()
 
 

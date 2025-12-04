@@ -55,6 +55,17 @@ def predict():
     except Exception as e:
         return jsonify({'error': f'failed to preprocess image: {e}'}), 400
 
+    # Save a debug copy of the received image for inspection (rotate samples directory)
+    try:
+        from datetime import datetime
+        samples_dir = Path('received_samples')
+        samples_dir.mkdir(exist_ok=True)
+        fname = samples_dir / f"recv_{datetime.utcnow().strftime('%Y%m%dT%H%M%S%f')}.jpg"
+        with open(fname, 'wb') as f:
+            f.write(img_bytes)
+    except Exception:
+        pass
+
     ort_inputs = {INPUT_NAME: x}
     ort_outs = ORT_SESSION.run([OUTPUT_NAME], ort_inputs)
     logits = ort_outs[0][0]
@@ -63,7 +74,18 @@ def predict():
     label = CLASSES[idx] if idx < len(CLASSES) else str(idx)
     confidence = float(probs[idx])
 
-    return jsonify({'label': label, 'confidence': confidence, 'all_probs': probs.tolist()})
+    response = {'label': label, 'confidence': confidence, 'all_probs': probs.tolist()}
+
+    # optionally return the raw uploaded image as base64 when debug=1 is passed
+    try:
+        debug_flag = request.args.get('debug', '0')
+        if debug_flag == '1':
+            import base64
+            response['debug_image_b64'] = base64.b64encode(img_bytes).decode('ascii')
+    except Exception:
+        pass
+
+    return jsonify(response)
 
 
 if __name__ == '__main__':

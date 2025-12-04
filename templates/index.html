@@ -18,8 +18,14 @@
         <button id="stopBtn" disabled>Stop</button>
         <label>Interval(ms): <input id="interval" type="number" value="600" min="100" step="100"></label>
         <label><input id="requireEyes" type="checkbox" checked> Require face & eyes to classify</label>
+        <label><input id="cropFace" type="checkbox" checked> Crop face region before sending</label>
+        <label><input id="sendDebug" type="checkbox"> Send debug image to server</label>
       </div>
       <div id="result">Prediction: <span id="label">-</span> (<span id="conf">-</span>)</div>
+      <div id="debug" style="margin-top:12px;display:flex;gap:12px;align-items:flex-start">
+        <div id="debugBox"></div>
+        <div id="debugText" style="font-family:monospace;white-space:pre;">Server debug output will appear here</div>
+      </div>
       <div id="log"></div>
     </div>
 
