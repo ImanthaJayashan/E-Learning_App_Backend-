@@ -14,3 +14,4 @@ model.onnx.data
 .DS_Store
 .idea/
 .vscode/
+received_samples/
