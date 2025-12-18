@@ -20,8 +20,12 @@
         <label><input id="requireEyes" type="checkbox" checked> Require face & eyes to classify</label>
         <label><input id="cropFace" type="checkbox" checked> Crop face region before sending</label>
         <label><input id="sendDebug" type="checkbox"> Send debug image to server</label>
+        <label><input id="showMetrics" type="checkbox"> Show eye iris metrics</label>
       </div>
       <div id="result">Prediction: <span id="label">-</span> (<span id="conf">-</span>)</div>
+      <div id="metricsPanel" style="display:none;margin:8px 0 0 0;">
+        <pre id="metricsText" style="font-family:monospace;white-space:pre-wrap;margin:0"></pre>
+      </div>
       <div id="debug" style="margin-top:12px;display:flex;gap:12px;align-items:flex-start">
         <div id="debugBox"></div>
         <div id="debugText" style="font-family:monospace;white-space:pre;">Server debug output will appear here</div>

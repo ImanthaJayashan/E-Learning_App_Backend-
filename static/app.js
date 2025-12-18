@@ -7,12 +7,16 @@ const confEl = document.getElementById('conf');
 const logEl = document.getElementById('log');
 const intervalInput = document.getElementById('interval');
 const requireEyesCb = document.getElementById('requireEyes');
+const showMetricsCb = document.getElementById('showMetrics');
+const metricsPanel = document.getElementById('metricsPanel');
+const metricsText = document.getElementById('metricsText');
 
 let stream = null;
 let timer = null;
 let faceMesh = null;
 let eyesDetected = false;
 let latestResults = null;
+let lastMetrics = null;
 // smoothing & debounce state
 const SMOOTH_WINDOW = 5; // number of recent predictions to average
 const CONSISTENT_REQUIRED = 3; // number of consecutive averaged-labels required to show
@@ -68,7 +72,7 @@ function scheduleSend(){
   timer = setTimeout(sendFrame, ms);
 }
 
-function drawOverlay(text, results){
+function drawOverlay(text, results, metrics){
   const ctx = overlay.getContext('2d');
   ctx.clearRect(0,0,overlay.width, overlay.height);
   if(results && results.multiFaceLandmarks){
@@ -81,6 +85,22 @@ function drawOverlay(text, results){
         ctx.fillRect(x-1, y-1, 2, 2);
       });
     });
+  }
+  // draw iris circles if metrics provided
+  if(metrics){
+    const ctx2 = ctx;
+    ctx2.strokeStyle = 'rgba(0,200,255,0.9)';
+    ctx2.lineWidth = 2;
+    if(metrics.left && metrics.left.center && metrics.left.r){
+      ctx2.beginPath();
+      ctx2.arc(metrics.left.center.x, metrics.left.center.y, metrics.left.r, 0, Math.PI*2);
+      ctx2.stroke();
+    }
+    if(metrics.right && metrics.right.center && metrics.right.r){
+      ctx2.beginPath();
+      ctx2.arc(metrics.right.center.x, metrics.right.center.y, metrics.right.r, 0, Math.PI*2);
+      ctx2.stroke();
+    }
   }
   ctx.fillStyle = 'rgba(0,0,0,0.4)';
   ctx.fillRect(0, overlay.height - 40, overlay.width, 40);
@@ -124,11 +144,16 @@ function initFaceMesh(){
   faceMesh.onResults((results) => {
     eyesDetected = hasEyes(results);
     latestResults = results;
-    // draw overlay (landmarks + text handled in sendFrame when we update)
-    // we don't call drawOverlay here because sendFrame will draw current text
-    // but for more real-time landmarks we draw them here too
+    // compute iris metrics if requested
+    if(showMetricsCb && showMetricsCb.checked){
+      lastMetrics = computeIrisMetrics(results);
+      updateMetricsPanel(lastMetrics);
+    } else {
+      lastMetrics = null;
+      if(metricsPanel) metricsPanel.style.display = 'none';
+    }
     const txt = eyesDetected ? 'Eyes detected' : 'No eyes detected';
-    drawOverlay(txt, results);
+    drawOverlay(txt, results, lastMetrics);
   });
 
   // Use MediaPipe Camera util if available for better performance
@@ -315,7 +340,11 @@ async function sendFrame(){
         // update UI
         labelEl.textContent = displayLabel;
         confEl.textContent = displayConf ? displayConf.toFixed(3) : '-';
-        drawOverlay(displayLabel === '-' ? 'Waiting for stable result...' : `${displayLabel} (${(displayConf*100).toFixed(1)}%)`);
+        drawOverlay(
+          displayLabel === '-' ? 'Waiting for stable result...' : `${displayLabel} (${(displayConf*100).toFixed(1)}%)`,
+          latestResults,
+          lastMetrics
+        );
 
         // display debug image and logits if present
         const debugBox = document.getElementById('debugBox');
@@ -351,3 +380,79 @@ video.addEventListener('loadedmetadata', ()=>{
   overlay.width = video.videoWidth;
   overlay.height = video.videoHeight;
 });
+
+function dist(a,b){ const dx=a.x-b.x, dy=a.y-b.y; return Math.hypot(dx,dy); }
+
+// Compute iris centers/radii, IPD, gaze ratios, and simple EAR per eye
+function computeIrisMetrics(results){
+  if(!results || !results.multiFaceLandmarks || !results.multiFaceLandmarks.length) return null;
+  const face = results.multiFaceLandmarks[0];
+  const W = overlay.width, H = overlay.height;
+  const px = (pt)=>({x: pt.x*W, y: pt.y*H});
+
+  const idx = {
+    lIris:[468,469,470,471,472], rIris:[473,474,475,476,477],
+    lOuter:33, lInner:133, lUp:159, lLow:145,
+    rInner:263, rOuter:362, rUp:386, rLow:374
+  };
+
+  const lIrisPts = idx.lIris.map(i=>px(face[i])).filter(Boolean);
+  const rIrisPts = idx.rIris.map(i=>px(face[i])).filter(Boolean);
+  if(!lIrisPts.length || !rIrisPts.length) return null;
+
+  const centerAndR = (pts)=>{
+    const c = {x: pts.reduce((s,p)=>s+p.x,0)/pts.length, y: pts.reduce((s,p)=>s+p.y,0)/pts.length};
+    const r = pts.reduce((s,p)=> s + Math.hypot(p.x-c.x,p.y-c.y), 0)/pts.length;
+    return {center:c, r};
+  };
+
+  const l = centerAndR(lIrisPts);
+  const r = centerAndR(rIrisPts);
+
+  const lOuter = px(face[idx.lOuter]);
+  const lInner = px(face[idx.lInner]);
+  const rInner = px(face[idx.rInner]);
+  const rOuter = px(face[idx.rOuter]);
+  const lUp = px(face[idx.lUp]);
+  const lLow = px(face[idx.lLow]);
+  const rUp = px(face[idx.rUp]);
+  const rLow = px(face[idx.rLow]);
+
+  const lWidth = dist(lOuter, lInner);
+  const rWidth = dist(rOuter, rInner);
+  const lEAR = lWidth>0 ? dist(lUp, lLow)/lWidth : 0;
+  const rEAR = rWidth>0 ? dist(rUp, rLow)/rWidth : 0;
+  const ipd = dist(l.center, r.center);
+  const lGaze = lWidth>0 ? (l.center.x - lInner.x)/lWidth : 0.5;
+  const rGaze = rWidth>0 ? (r.center.x - rInner.x)/rWidth : 0.5;
+
+  return {
+    left: { center: l.center, r: l.r, width: lWidth, ear: lEAR, gazeX: lGaze },
+    right:{ center: r.center, r: r.r, width: rWidth, ear: rEAR, gazeX: rGaze },
+    ipd
+  };
+}
+
+function updateMetricsPanel(m){
+  if(!metricsPanel || !metricsText){ return; }
+  if(!m){ metricsPanel.style.display='none'; return; }
+  metricsPanel.style.display = 'block';
+  const fmt = (n)=> (n!=null && isFinite(n)) ? n.toFixed(2) : '-';
+  metricsText.textContent = [
+    `Left iris: cx=${fmt(m.left.center.x)}, cy=${fmt(m.left.center.y)}, r=${fmt(m.left.r)}`,
+    `Right iris: cx=${fmt(m.right.center.x)}, cy=${fmt(m.right.center.y)}, r=${fmt(m.right.r)}`,
+    `IPD (px): ${fmt(m.ipd)}`,
+    `Gaze ratio L/R: ${fmt(m.left.gazeX)} / ${fmt(m.right.gazeX)} (0=inner, 1=outer)`,
+    `EAR L/R: ${fmt(m.left.ear)} / ${fmt(m.right.ear)} (blink if < ~0.20)`
+  ].join('\n');
+}
+
+// Toggle metrics panel visibility
+if(showMetricsCb){
+  showMetricsCb.addEventListener('change', ()=>{
+    if(!showMetricsCb.checked){
+      lastMetrics = null;
+      if(metricsPanel) metricsPanel.style.display='none';
+    }
+  });
+}
