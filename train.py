@@ -7,6 +7,7 @@ from sklearn.metrics import classification_report, confusion_matrix
 import matplotlib.pyplot as plt
 import numpy as np
 
+# Configuration and Hyperparameters
 num_classes = 17
 data_dir = 'data' 
 # Data Augmentation and Preprocessing
