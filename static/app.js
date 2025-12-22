@@ -10,6 +10,8 @@ const requireEyesCb = document.getElementById('requireEyes');
 const showMetricsCb = document.getElementById('showMetrics');
 const metricsPanel = document.getElementById('metricsPanel');
 const metricsText = document.getElementById('metricsText');
+const sessionLabelEl = document.getElementById('sessionLabel');
+const sessionCountEl = document.getElementById('sessionCount');
 
 let stream = null;
 let timer = null;
@@ -26,6 +28,7 @@ let probsHistory = [];
 let lastAveragedLabel = null;
 let consistentCount = 0;
 let lastSendTime = 0;
+let sessionVotes = [];
 
 function log(msg){
   const p = document.createElement('div');
@@ -35,6 +38,7 @@ function log(msg){
 
 async function startCamera(){
   try{
+    resetSessionVotes();
     stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
     video.srcObject = stream;
     await video.play();
@@ -63,6 +67,7 @@ function stopCamera(){
     faceMesh.close();
     faceMesh = null;
   }
+   finalizeSession();
   startBtn.disabled = false;
   stopBtn.disabled = true;
 }
@@ -346,6 +351,12 @@ async function sendFrame(){
           lastMetrics
         );
 
+        // record vote for session majority if we have a valid label
+        if(displayLabel && displayLabel !== '-'){
+          sessionVotes.push({label: displayLabel, conf: displayConf || 0});
+          updateSessionSummaryLive();
+        }
+
         // display debug image and logits if present
         const debugBox = document.getElementById('debugBox');
         const debugText = document.getElementById('debugText');
@@ -455,4 +466,45 @@ if(showMetricsCb){
       if(metricsPanel) metricsPanel.style.display='none';
     }
   });
+}
+
+function resetSessionVotes(){
+  sessionVotes = [];
+  if(sessionLabelEl) sessionLabelEl.textContent = '-';
+  if(sessionCountEl) sessionCountEl.textContent = '0';
+}
+
+function finalizeSession(){
+  if(!sessionVotes.length){
+    if(sessionLabelEl) sessionLabelEl.textContent = 'No detections';
+    if(sessionCountEl) sessionCountEl.textContent = '0';
+    return;
+  }
+  const majority = computeMajority(sessionVotes);
+  if(sessionLabelEl) sessionLabelEl.textContent = majority.label;
+  if(sessionCountEl) sessionCountEl.textContent = String(majority.count);
+}
+
+function updateSessionSummaryLive(){
+  if(!sessionVotes.length) return;
+  const majority = computeMajority(sessionVotes);
+  if(sessionLabelEl) sessionLabelEl.textContent = majority.label;
+  if(sessionCountEl) sessionCountEl.textContent = String(majority.count);
+}
+
+function computeMajority(votes){
+  const tally = new Map();
+  votes.forEach(v => {
+    const prev = tally.get(v.label) || {count:0, conf:0};
+    prev.count += 1;
+    prev.conf += v.conf || 0;
+    tally.set(v.label, prev);
+  });
+  let best = {label:'-', count:0, conf:0};
+  tally.forEach((val, key) => {
+    if(val.count > best.count || (val.count === best.count && val.conf > best.conf)){
+      best = {label:key, count:val.count, conf:val.conf};
+    }
+  });
+  return best;
 }
