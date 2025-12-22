@@ -1,0 +1,72 @@
+{
+  "feature_columns": [
+    "avg_response_time",
+    "median_response_time",
+    "std_response_time",
+    "max_response_time",
+    "min_response_time",
+    "response_time_range",
+    "slow_response_count",
+    "very_slow_count",
+    "slow_response_pct",
+    "accuracy_rate",
+    "total_attempts",
+    "incorrect_count"
+  ],
+  "threshold_probability": 0.5,
+  "min_attempts_for_prediction": 5,
+  "version": "1.0",
+  "training_date": "2025-11-29T20:07:17.262587",
+  "training_samples": 12,
+  "test_accuracy": 1.0,
+  "feature_importance": [
+    {
+      "feature": "median_response_time",
+      "importance": 0.18644067796610164
+    },
+    {
+      "feature": "avg_response_time",
+      "importance": 0.1807244858092316
+    },
+    {
+      "feature": "slow_response_pct",
+      "importance": 0.16726587913028593
+    },
+    {
+      "feature": "min_response_time",
+      "importance": 0.15819209039548024
+    },
+    {
+      "feature": "slow_response_count",
+      "importance": 0.1449605008927043
+    },
+    {
+      "feature": "very_slow_count",
+      "importance": 0.07096808934154042
+    },
+    {
+      "feature": "response_time_range",
+      "importance": 0.030527807767517217
+    },
+    {
+      "feature": "total_attempts",
+      "importance": 0.019563299224316183
+    },
+    {
+      "feature": "accuracy_rate",
+      "importance": 0.01797637390857731
+    },
+    {
+      "feature": "std_response_time",
+      "importance": 0.010382273094137506
+    },
+    {
+      "feature": "max_response_time",
+      "importance": 0.007924279110719792
+    },
+    {
+      "feature": "incorrect_count",
+      "importance": 0.005074243359387933
+    }
+  ]
+}

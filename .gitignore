@@ -1,0 +1,9 @@
+# Python
+backend/venv/
+__pycache__/
+
+# Node / React
+animal-sound-safari/node_modules/
+
+# Environment
+.env
