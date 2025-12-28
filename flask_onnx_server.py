@@ -4,8 +4,12 @@ from PIL import Image
 import numpy as np
 import io
 import torch
+from pathlib import Path
 
 app = Flask(__name__)
+
+# Minimum probability required to call a lazy_eye; below this we fall back to uncertain/normal.
+LAZY_THRESHOLD = 0.9
 
 # Load classes from checkpoint if available
 try:
@@ -71,10 +75,22 @@ def predict():
     logits = ort_outs[0][0]
     probs = softmax(logits)
     idx = int(np.argmax(probs))
-    label = CLASSES[idx] if idx < len(CLASSES) else str(idx)
+    raw_label = CLASSES[idx] if idx < len(CLASSES) else str(idx)
     confidence = float(probs[idx])
 
-    response = {'label': label, 'confidence': confidence, 'all_probs': probs.tolist()}
+    # Apply a conservative threshold: only call lazy_eye when probability is high enough.
+    if raw_label == 'lazy_eye' and confidence < LAZY_THRESHOLD:
+        label = 'uncertain_normal'
+    else:
+        label = raw_label
+
+    response = {
+        'label': label,
+        'raw_label': raw_label,
+        'confidence': confidence,
+        'threshold': LAZY_THRESHOLD,
+        'all_probs': probs.tolist()
+    }
 
     # optionally return the raw uploaded image as base64 when debug=1 is passed
     try:
