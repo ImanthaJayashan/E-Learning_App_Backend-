@@ -5,6 +5,9 @@ import numpy as np
 import io
 import torch
 from pathlib import Path
+import json
+from datetime import datetime
+from collections import deque
 
 app = Flask(__name__)
 
@@ -23,6 +26,10 @@ ORT_SESSION = ort.InferenceSession('model.onnx')
 INPUT_NAME = ORT_SESSION.get_inputs()[0].name
 OUTPUT_NAME = ORT_SESSION.get_outputs()[0].name
 
+# Rolling window for temporal smoothing of probabilities
+SMOOTH_WINDOW = 5
+PROB_HISTORY = deque(maxlen=SMOOTH_WINDOW)
+
 
 def preprocess_image_bytes(image_bytes, img_size=224):
     img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
@@ -40,6 +47,70 @@ def preprocess_image_bytes(image_bytes, img_size=224):
 def softmax(x):
     e = np.exp(x - np.max(x))
     return e / e.sum()
+
+
+def extract_iris_xy(iris_metrics):
+    """Extract flattened iris centers if provided by client."""
+    try:
+        left_c = iris_metrics.get('left', {}).get('center', {}) if iris_metrics else {}
+        right_c = iris_metrics.get('right', {}).get('center', {}) if iris_metrics else {}
+        left_gaze = iris_metrics.get('left', {}).get('gazeX') if iris_metrics else None
+        right_gaze = iris_metrics.get('right', {}).get('gazeX') if iris_metrics else None
+        return {
+            'left_iris_x': left_c.get('x'),
+            'left_iris_y': left_c.get('y'),
+            'right_iris_x': right_c.get('x'),
+            'right_iris_y': right_c.get('y'),
+            'ipd_px': iris_metrics.get('ipd'),
+            'left_gaze_ratio': left_gaze,
+            'right_gaze_ratio': right_gaze,
+        }
+    except Exception:
+        return {}
+
+
+def save_inference_result(prediction_label, confidence, raw_label, iris_metrics=None, lazy_confidence=None,
+                          smooth_label=None, smooth_confidence=None, smooth_lazy_confidence=None):
+    """Save inference result with optional iris metrics to JSON."""
+    try:
+        results_file = Path('received_samples/inference_results.json')
+        results_file.parent.mkdir(exist_ok=True)
+        
+        result = {
+            'timestamp': datetime.utcnow().isoformat(),
+            'label': prediction_label,
+            'raw_label': raw_label,
+            'confidence': float(confidence),
+            'lazy_eye_confidence': float(lazy_confidence) if lazy_confidence is not None else None,
+            'smooth_label': smooth_label,
+            'smooth_confidence': float(smooth_confidence) if smooth_confidence is not None else None,
+            'smooth_lazy_eye_confidence': float(smooth_lazy_confidence) if smooth_lazy_confidence is not None else None,
+        }
+        
+        if iris_metrics:
+            result['iris_metrics'] = iris_metrics
+            result.update(extract_iris_xy(iris_metrics))
+        
+        # Load existing records or start new
+        records = []
+        if results_file.exists():
+            try:
+                with open(results_file, 'r') as f:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        records = data
+                    elif isinstance(data, dict) and 'records' in data:
+                        records = data['records']
+            except Exception:
+                pass
+        
+        records.append(result)
+        
+        # Save back
+        with open(results_file, 'w') as f:
+            json.dump(records, f, indent=2)
+    except Exception as e:
+        print(f"Failed to save inference result: {e}")
 
 
 @app.route('/')
@@ -77,8 +148,29 @@ def predict():
     idx = int(np.argmax(probs))
     raw_label = CLASSES[idx] if idx < len(CLASSES) else str(idx)
     confidence = float(probs[idx])
+    # lazy-eye specific probability (if class exists)
+    lazy_idx = None
+    try:
+        lazy_idx = CLASSES.index('lazy_eye')
+    except Exception:
+        lazy_idx = None
+    lazy_confidence = float(probs[lazy_idx]) if lazy_idx is not None and lazy_idx < len(probs) else None
 
-    # Apply a conservative threshold: only call lazy_eye when probability is high enough.
+    # Temporal smoothing (simple average over last N probability vectors)
+    PROB_HISTORY.append(probs)
+    if len(PROB_HISTORY) > 0:
+        avg_probs = np.mean(np.stack(PROB_HISTORY, axis=0), axis=0)
+        smooth_idx = int(np.argmax(avg_probs))
+        smooth_label = CLASSES[smooth_idx] if smooth_idx < len(CLASSES) else str(smooth_idx)
+        smooth_confidence = float(avg_probs[smooth_idx])
+        smooth_lazy_confidence = float(avg_probs[lazy_idx]) if lazy_idx is not None and lazy_idx < len(avg_probs) else None
+    else:
+        avg_probs = probs
+        smooth_label = raw_label
+        smooth_confidence = confidence
+        smooth_lazy_confidence = lazy_confidence
+
+    # Apply a conservative threshold: only call lazy_eye when probability is high enough (raw path).
     if raw_label == 'lazy_eye' and confidence < LAZY_THRESHOLD:
         label = 'uncertain_normal'
     else:
@@ -88,9 +180,32 @@ def predict():
         'label': label,
         'raw_label': raw_label,
         'confidence': confidence,
+        'lazy_eye_confidence': lazy_confidence,
         'threshold': LAZY_THRESHOLD,
-        'all_probs': probs.tolist()
+        'all_probs': probs.tolist(),
+        'smooth_label': smooth_label,
+        'smooth_confidence': smooth_confidence,
+        'smooth_lazy_eye_confidence': smooth_lazy_confidence,
+        'smooth_window': SMOOTH_WINDOW,
+        'smooth_count': len(PROB_HISTORY)
     }
+    
+    # Try to extract iris metrics if provided by client
+    iris_metrics = None
+    try:
+        # Client may send iris metrics as JSON in request
+        metrics_str = request.form.get('iris_metrics')
+        if metrics_str:
+            iris_metrics = json.loads(metrics_str)
+            response['iris_metrics'] = iris_metrics
+            response.update(extract_iris_xy(iris_metrics))
+    except Exception:
+        pass
+    
+    # Save prediction result with metrics
+    save_inference_result(label, confidence, raw_label, iris_metrics, lazy_confidence,
+                          smooth_label=smooth_label, smooth_confidence=smooth_confidence,
+                          smooth_lazy_confidence=smooth_lazy_confidence)
 
     # optionally return the raw uploaded image as base64 when debug=1 is passed
     try:

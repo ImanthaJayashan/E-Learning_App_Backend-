@@ -283,6 +283,10 @@ async function sendFrame(){
       const fd = new FormData();
       // send face crop with original video bbox metadata so server could optionally align
       fd.append('image', blob, 'frame.jpg');
+        // send iris metrics if available
+        if(lastMetrics){
+          fd.append('iris_metrics', JSON.stringify(lastMetrics));
+        }
       // include bbox coordinates to server (optional)
       if(!(sx === 0 && sy === 0 && sw === video.videoWidth && sh === video.videoHeight)){
         fd.append('bbox', JSON.stringify({sx, sy, sw, sh, vw: video.videoWidth, vh: video.videoHeight}));
