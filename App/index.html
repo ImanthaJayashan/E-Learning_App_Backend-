@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Handwritten Digit Prediction</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f0f0f0;
+            margin: 0;
+        }
+
+        .main-container {
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            gap: 30px;
+            flex-wrap: wrap;
+        }
+
+        .left-panel {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .right-panel {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .controls {
+            margin-bottom: 20px;
+        }
+
+        canvas {
+            border: 1px solid #000;
+            background-color: #fff;
+            cursor: crosshair;
+            display: block;
+            /* Remove extra space below canvas */
+        }
+
+        button {
+            margin: 10px;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #4caf50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+        }
+
+        button:hover {
+            background-color: #45a049;
+        }
+
+        #clearButton {
+            background-color: #f44336;
+        }
+
+        #clearButton:hover {
+            background-color: #da190b;
+        }
+
+        h1 {
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        #result {
+            margin-top: 20px;
+            font-size: 18px;
+            font-weight: bold;
+            min-height: 30px;
+            text-align: center;
+        }
+
+        #percentage {
+            margin-top: 10px;
+            font-size: 16px;
+            min-height: 20px;
+            text-align: center;
+        }
+
+        .loading {
+            color: #007bff;
+        }
+
+        .success {
+            color: #28a745;
+        }
+
+        .error {
+            color: #dc3545;
+        }
+
+        .allData {
+            margin-top: 58px;
+            font-size: 14px;
+            height: 420px;
+            overflow-y: auto;
+            width: 300px;
+            text-align: left;
+            border: 1px solid #ccc;
+            padding: 15px;
+            background-color: #fff;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+
+        .allData h3 {
+            margin-top: 0;
+            margin-bottom: 15px;
+            text-align: center;
+            color: #333;
+        }
+
+        .confidence-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            padding: 5px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .confidence-letter {
+            font-weight: bold;
+            color: #333;
+        }
+
+        .confidence-value {
+            color: #666;
+        }
+
+        .top-prediction {
+            background-color: #e8f5e8;
+            border-left: 3px solid #4caf50;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Handwritten Digit Prediction</h1>
+    <div class="main-container">
+        <div class="left-panel">
+            <div class="controls">
+                <button id="clearButton">Clear Canvas</button>
+                <button id="predictButton">Predict</button>
+            </div>
+            <canvas id="canvas" width="450" height="450"></canvas>
+            <div id="result"></div>
+            <div id="percentage"></div>
+        </div>
+
+        <div class="right-panel">
+            <div id="allData" class="allData">
+                <!-- Confidence data will be displayed here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById("canvas");
+        const ctx = canvas.getContext("2d");
+        const predictButton = document.getElementById("predictButton");
+        const clearButton = document.getElementById("clearButton");
+        const resultDiv = document.getElementById("result");
+        const percentageDiv = document.getElementById("percentage");
+        const allDataDiv = document.getElementById("allData");
+
+        let isDrawing = false;
+        let lastX = 0;
+        let lastY = 0;
+
+        // Function to set the canvas background to white
+        function setCanvasBackground() {
+            ctx.fillStyle = "white";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = "black"; // Reset to black for drawing
+        }
+
+        // Function to clear canvas completely
+        function clearCanvas() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            setCanvasBackground();
+            ctx.beginPath(); // Reset the path
+        }
+
+        canvas.addEventListener("mousedown", (e) => {
+            isDrawing = true;
+            [lastX, lastY] = [e.offsetX, e.offsetY];
+            ctx.beginPath();
+            ctx.moveTo(lastX, lastY);
+        });
+
+        canvas.addEventListener("mousemove", (e) => {
+            if (!isDrawing) return;
+
+            ctx.strokeStyle = "black";
+            ctx.lineWidth = 20;
+            ctx.lineCap = "round";
+            ctx.lineJoin = "round";
+
+            ctx.lineTo(e.offsetX, e.offsetY);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(e.offsetX, e.offsetY);
+        });
+
+        canvas.addEventListener("mouseup", () => {
+            isDrawing = false;
+            ctx.beginPath();
+        });
+
+        canvas.addEventListener("mouseout", () => {
+            isDrawing = false;
+            ctx.beginPath();
+        });
+
+        clearButton.addEventListener("click", () => {
+            clearCanvas();
+            resultDiv.textContent = "";
+            percentageDiv.textContent = "";
+            allDataDiv.innerHTML = "";
+            resultDiv.className = "";
+            percentageDiv.className = "";
+        });
+
+        predictButton.addEventListener("click", async () => {
+            // Show loading state
+            resultDiv.textContent = "Predicting...";
+            percentageDiv.textContent = "";
+            allDataDiv.innerHTML = "<div>Loading...</div>";
+            resultDiv.className = "loading";
+            percentageDiv.className = "";
+
+            try {
+                // Create a temporary canvas to ensure we send only the drawing
+                const tempCanvas = document.createElement("canvas");
+                const tempCtx = tempCanvas.getContext("2d");
+                tempCanvas.width = canvas.width;
+                tempCanvas.height = canvas.height;
+
+                // Set white background
+                tempCtx.fillStyle = "white";
+                tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+
+                // Draw the original canvas content
+                tempCtx.drawImage(canvas, 0, 0);
+
+                // Convert canvas to blob
+                const blob = await new Promise((resolve) => {
+                    tempCanvas.toBlob(resolve, "image/png");
+                });
+
+                // Create form data
+                const formData = new FormData();
+                formData.append("image", blob, "digit.png");
+
+                // Send to prediction API
+                const response = await fetch("http://127.0.0.1:5000/predict", {
+                    method: "POST",
+                    body: formData,
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    resultDiv.textContent = `Predicted: ${data.result}`;
+                    percentageDiv.textContent = `Confidence: ${data.percentage}`;
+
+                    // Display all confidence data in a formatted way
+                    let allDataHTML = "<h3>All Predictions</h3>";
+                    if (data.class_probabilities) {
+                        data.class_probabilities.forEach((item, index) => {
+                            const letter = Object.keys(item)[0];
+                            const confidence = item[letter];
+                            const isTopPrediction = index === 0;
+                            const itemClass = isTopPrediction
+                                ? "confidence-item top-prediction"
+                                : "confidence-item";
+
+                            allDataHTML += `
+                  <div class="${itemClass}">
+                    <span class="confidence-letter">${letter}</span>
+                    <span class="confidence-value">${confidence}</span>
+                  </div>
+                `;
+                        });
+                    }
+
+                    allDataDiv.innerHTML = allDataHTML;
+                    resultDiv.className = "success";
+                    percentageDiv.className = "success";
+                } else {
+                    resultDiv.textContent = `Error: ${data.error}`;
+                    percentageDiv.textContent = "";
+                    allDataDiv.innerHTML = "";
+                    resultDiv.className = "error";
+                }
+            } catch (error) {
+                resultDiv.textContent = `Error: ${error.message}`;
+                percentageDiv.textContent = "";
+                allDataDiv.innerHTML = "";
+                resultDiv.className = "error";
+                console.error("Prediction error:", error);
+            }
+        });
+
+        // Touch support for mobile devices
+        canvas.addEventListener("touchstart", (e) => {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const rect = canvas.getBoundingClientRect();
+            const mouseEvent = new MouseEvent("mousedown", {
+                clientX: touch.clientX,
+                clientY: touch.clientY,
+            });
+            canvas.dispatchEvent(mouseEvent);
+        });
+
+        canvas.addEventListener("touchmove", (e) => {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const mouseEvent = new MouseEvent("mousemove", {
+                clientX: touch.clientX,
+                clientY: touch.clientY,
+            });
+            canvas.dispatchEvent(mouseEvent);
+        });
+
+        canvas.addEventListener("touchend", (e) => {
+            e.preventDefault();
+            const mouseEvent = new MouseEvent("mouseup", {});
+            canvas.dispatchEvent(mouseEvent);
+        });
+
+        // Initialize the canvas with a white background
+        setCanvasBackground();
+    </script>
+</body>
+
+</html>
