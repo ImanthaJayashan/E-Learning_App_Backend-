@@ -1,4 +1,6 @@
 import os
+import io
+from PIL import Image
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
@@ -17,10 +19,13 @@ def predict():
         return jsonify({'error': 'No image provided'}), 400
 
     file = request.files['image']
-    if file.filename == '':
-        return jsonify({'error': 'Empty filename'}), 400
+    img_bytes = file.read()
 
-    return jsonify({'message': 'Image received successfully'}), 200
+    image = Image.open(io.BytesIO(img_bytes)).convert('L')
+    file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+    image.save(file_path)
+
+    return jsonify({'message': 'Image saved successfully'}), 200
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
