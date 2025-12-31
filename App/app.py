@@ -1,31 +1,21 @@
-import os
-import io
-from PIL import Image
-from flask import Flask, request, jsonify
+import torch
+import torch.nn as nn
+from torchvision import models
+from flask import Flask
 from flask_cors import CORS
 
 app = Flask(__name__)
 CORS(app)
 
-UPLOAD_FOLDER = 'uploads'
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+letters_model = models.resnet18(weights='IMAGENET1K_V1')
+letters_model.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
+letters_model.fc = nn.Linear(letters_model.fc.in_features, 17)
 
-if not os.path.exists(UPLOAD_FOLDER):
-    os.makedirs(UPLOAD_FOLDER)
+letters_model.eval()
 
-@app.route('/predict', methods=['POST'])
-def predict():
-    if 'image' not in request.files:
-        return jsonify({'error': 'No image provided'}), 400
-
-    file = request.files['image']
-    img_bytes = file.read()
-
-    image = Image.open(io.BytesIO(img_bytes)).convert('L')
-    file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
-    image.save(file_path)
-
-    return jsonify({'message': 'Image saved successfully'}), 200
+@app.route('/')
+def home():
+    return {"message": "Model architecture initialized"}
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
