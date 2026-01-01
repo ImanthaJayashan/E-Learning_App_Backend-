@@ -1,21 +1,33 @@
+import io
 import torch
-import torch.nn as nn
-from torchvision import models
-from flask import Flask
+from PIL import Image
+from flask import Flask, request, jsonify
 from flask_cors import CORS
+from torchvision import transforms
 
 app = Flask(__name__)
 CORS(app)
 
-letters_model = models.resnet18(weights='IMAGENET1K_V1')
-letters_model.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
-letters_model.fc = nn.Linear(letters_model.fc.in_features, 17)
+transform = transforms.Compose([
+    transforms.Grayscale(num_output_channels=1),
+    transforms.ToTensor(),
+    transforms.Normalize([0.5], [0.5])
+])
 
-letters_model.eval()
+@app.route('/predict', methods=['POST'])
+def predict():
+    if 'image' not in request.files:
+        return jsonify({'error': 'No image provided'}), 400
 
-@app.route('/')
-def home():
-    return {"message": "Model architecture initialized"}
+    img_bytes = request.files['image'].read()
+    image = Image.open(io.BytesIO(img_bytes))
+
+    processed_image = transform(image).unsqueeze(0)
+
+    return jsonify({
+        "message": "Image processed successfully",
+        "tensor_shape": list(processed_image.shape)
+    }), 200
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
