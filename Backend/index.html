@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Handwritten Digit Prediction</title>
+    <title>Handwritten Letter Prediction</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -148,7 +148,7 @@
 </head>
 
 <body>
-    <h1>Handwritten Digit Prediction</h1>
+    <h1>Handwritten Letter Prediction</h1>
     <div class="main-container">
         <div class="left-panel">
             <div class="controls">
@@ -263,7 +263,7 @@
 
                 // Create form data
                 const formData = new FormData();
-                formData.append("image", blob, "digit.png");
+                formData.append("image", blob, "letter.png");
 
                 // Send to prediction API
                 const response = await fetch("http://127.0.0.1:5000/predict", {

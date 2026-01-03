@@ -1,7 +1,3 @@
-*.pth
-*.h5
-uploads/
-model/
 # Dependencies
 node_modules/
 node_modules/.vite/
