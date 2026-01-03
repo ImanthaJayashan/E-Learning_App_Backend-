@@ -383,5 +383,71 @@
     "total_score": 2,
     "game_duration_sec": 36.022,
     "timestamp": "2025-12-13T08:49:26.968425"
+  },
+  {
+    "session_id": "session_1766943299049_tlmus3l3fa",
+    "animal_shown": "dog",
+    "animal_selected": "cow",
+    "is_correct": false,
+    "response_time_ms": 3704,
+    "attempt_number": 1,
+    "total_score": 0,
+    "game_duration_sec": 3.7,
+    "timestamp": "2025-12-28T23:05:05.761366"
+  },
+  {
+    "session_id": "session_1766943299049_tlmus3l3fa",
+    "animal_shown": "dog",
+    "animal_selected": "cow",
+    "is_correct": false,
+    "response_time_ms": 2824,
+    "attempt_number": 2,
+    "total_score": 0,
+    "game_duration_sec": 10.071,
+    "timestamp": "2025-12-28T23:05:11.847264"
+  },
+  {
+    "session_id": "session_1766943299049_tlmus3l3fa",
+    "animal_shown": "dog",
+    "animal_selected": "cow",
+    "is_correct": false,
+    "response_time_ms": 3098,
+    "attempt_number": 3,
+    "total_score": 0,
+    "game_duration_sec": 15.203,
+    "timestamp": "2025-12-28T23:05:17.240544"
+  },
+  {
+    "session_id": "session_1766943299049_tlmus3l3fa",
+    "animal_shown": "dog",
+    "animal_selected": "dog",
+    "is_correct": true,
+    "response_time_ms": 3471,
+    "attempt_number": 4,
+    "total_score": 1,
+    "game_duration_sec": 20.723,
+    "timestamp": "2025-12-28T23:05:22.498893"
+  },
+  {
+    "session_id": "session_1766943299049_tlmus3l3fa",
+    "animal_shown": "dog",
+    "animal_selected": "cat",
+    "is_correct": false,
+    "response_time_ms": 2611,
+    "attempt_number": 5,
+    "total_score": 1,
+    "game_duration_sec": 33.001,
+    "timestamp": "2025-12-28T23:05:34.776628"
+  },
+  {
+    "session_id": "session_1766943299049_tlmus3l3fa",
+    "animal_shown": "dog",
+    "animal_selected": "dog",
+    "is_correct": true,
+    "response_time_ms": 2673,
+    "attempt_number": 6,
+    "total_score": 2,
+    "game_duration_sec": 39.486,
+    "timestamp": "2025-12-28T23:05:41.262420"
   }
 ]
