@@ -45,16 +45,19 @@ Notes
 If you want, I can also add example commands to convert or move trained weights into `Backend/models/` and update the code to load different weight filenames.
 
 **Architecture & Flow**
+<img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/48eaf462-dfdd-442b-a9a5-1fe9b011f6b6" />
 
-![alt text](image.png)
+
 
 ## Below is a high-level architecture diagram and request flow for the project. 
-![alt text](<Untitled diagram-2026-01-04-060800.png>)
+<img width="4101" height="4665" alt="Untitled diagram-2026-01-04-060800" src="https://github.com/user-attachments/assets/3f0ce3f0-74d9-4469-a245-ca3cafef2acd" />
+
 
 
 
 ## Sequence Diagram:
-![alt text](<Untitled diagram-2026-01-04-061021.png>)
+<img width="7020" height="3225" alt="Untitled diagram-2026-01-04-061021" src="https://github.com/user-attachments/assets/35b3654e-74bc-4776-a404-0c711b796161" />
+
 
 User -> Frontend -> Flask API (/predict) -> PyTorch Model (Backend/models/letters_model.pth)
 									^                                   |
