@@ -12,57 +12,8 @@ This project is an AI-powered medical diagnosis system that detects lazy eye (am
 
 ## 🏗️ Architecture Diagram
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        USER INTERFACE                            │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │   Frontend (HTML/CSS/JavaScript)                          │  │
-│  │   - Image Upload Interface                                │  │
-│  │   - Real-time Prediction Display                          │  │
-│  └────────────────────┬─────────────────────────────────────┘  │
-└────────────────────────┼────────────────────────────────────────┘
-                         │ HTTP Requests
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      BACKEND SERVER                              │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │   Flask Server (Python)                                   │  │
-│  │   - REST API Endpoints                                    │  │
-│  │   - Image Processing                                      │  │
-│  │   - Request Handling                                      │  │
-│  └────────────────────┬─────────────────────────────────────┘  │
-└────────────────────────┼────────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      AI/ML LAYER                                 │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │   ONNX Runtime Model                                      │  │
-│  │   - MobileNetV2 Architecture                              │  │
-│  │   - Binary Classification (Lazy/Normal)                   │  │
-│  │   - Image Preprocessing                                   │  │
-│  │   - Prediction Inference                                  │  │
-│  └────────────────────┬─────────────────────────────────────┘  │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │   Computer Vision Processing                              │  │
-│  │   - OpenCV for Image Analysis                             │  │
-│  │   - Iris Metrics Extraction                               │  │
-│  │   - Eye Feature Detection                                 │  │
-│  └──────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    DATA STORAGE                                  │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │   File System Storage                                     │  │
-│  │   - Training Dataset (eye_data/)                          │  │
-│  │   - Model Checkpoints (checkpoints/)                      │  │
-│  │   - ONNX Models (model.onnx)                              │  │
-│  │   - Inference Results (received_samples/)                 │  │
-│  └──────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-```
+<img width="1171" height="571" alt="Untitled Diagram drawio (1)" src="https://github.com/user-attachments/assets/468168ff-3d0f-4216-9813-696dae9c87b5" />
+
 
 ### System Components:
 
