@@ -8,6 +8,7 @@ from pathlib import Path
 import json
 from datetime import datetime
 from collections import deque
+from gaze_analysis import enhance_lazy_eye_detection
 
 app = Flask(__name__)
 
@@ -170,11 +171,62 @@ def predict():
         smooth_confidence = confidence
         smooth_lazy_confidence = lazy_confidence
 
-    # Apply a conservative threshold: only call lazy_eye when probability is high enough (raw path).
+    # Keep the lazy_eye label but surface uncertainty instead of relabeling as normal.
+    label = raw_label
+    is_uncertain = False
+    uncertainty_reason = None
     if raw_label == 'lazy_eye' and confidence < LAZY_THRESHOLD:
-        label = 'uncertain_normal'
-    else:
-        label = raw_label
+        is_uncertain = True
+        uncertainty_reason = f"lazy_eye confidence {confidence:.3f} below threshold {LAZY_THRESHOLD}"
+
+    # Try to extract iris metrics if provided by client
+    iris_metrics = None
+    gaze_analysis = None
+    try:
+        # Client may send iris metrics as JSON in request
+        metrics_str = request.form.get('iris_metrics')
+        if metrics_str:
+            iris_metrics = json.loads(metrics_str)
+    except Exception:
+        pass
+    
+    # Enhanced lazy eye detection using gaze analysis if we have iris metrics
+    if iris_metrics and raw_label == 'lazy_eye':
+        try:
+            left_gaze_x = iris_metrics.get('left', {}).get('gazeX')
+            right_gaze_x = iris_metrics.get('right', {}).get('gazeX')
+            left_ear = iris_metrics.get('left', {}).get('ear')
+            right_ear = iris_metrics.get('right', {}).get('ear')
+            ipd_px = iris_metrics.get('ipd')
+            
+            # Try to get vertical iris positions if available
+            left_iris_y = None
+            right_iris_y = None
+            if 'left' in iris_metrics and 'center' in iris_metrics['left']:
+                left_iris_y = iris_metrics['left'].get('center', {}).get('y')
+            if 'right' in iris_metrics and 'center' in iris_metrics['right']:
+                right_iris_y = iris_metrics['right'].get('center', {}).get('y')
+            
+            if all([left_gaze_x is not None, right_gaze_x is not None, left_ear is not None, right_ear is not None, ipd_px is not None]):
+                gaze_analysis = enhance_lazy_eye_detection(
+                    raw_label=raw_label,
+                    confidence=confidence,
+                    left_gaze_x=left_gaze_x,
+                    right_gaze_x=right_gaze_x,
+                    left_ear=left_ear,
+                    right_ear=right_ear,
+                    ipd_px=ipd_px,
+                    left_iris_y=left_iris_y,
+                    right_iris_y=right_iris_y,
+                    image_height=224
+                )
+                if gaze_analysis['refined_label'] != raw_label:
+                    label = gaze_analysis['refined_label']
+                    confidence = gaze_analysis['refined_confidence']
+                    is_uncertain = True
+                    uncertainty_reason = f"Gaze analysis: {gaze_analysis['analysis']['eye_condition_notes']}"
+        except Exception as e:
+            pass
 
     response = {
         'label': label,
@@ -187,20 +239,31 @@ def predict():
         'smooth_confidence': smooth_confidence,
         'smooth_lazy_eye_confidence': smooth_lazy_confidence,
         'smooth_window': SMOOTH_WINDOW,
-        'smooth_count': len(PROB_HISTORY)
+        'smooth_count': len(PROB_HISTORY),
+        'is_uncertain': is_uncertain,
+        'uncertainty_reason': uncertainty_reason,
     }
     
-    # Try to extract iris metrics if provided by client
-    iris_metrics = None
-    try:
-        # Client may send iris metrics as JSON in request
-        metrics_str = request.form.get('iris_metrics')
-        if metrics_str:
-            iris_metrics = json.loads(metrics_str)
-            response['iris_metrics'] = iris_metrics
-            response.update(extract_iris_xy(iris_metrics))
-    except Exception:
-        pass
+    # Add gaze analysis to response
+    if gaze_analysis:
+        response['gaze_analysis'] = {
+            'looking_at_screen': gaze_analysis['analysis']['looking_at_screen'],
+            'looking_at_camera': gaze_analysis['analysis']['looking_at_camera'],
+            'gaze_direction': gaze_analysis['analysis']['gaze_direction'],
+            'horizontal_alignment': gaze_analysis['analysis']['horizontal_alignment'],
+            'eye_openness': gaze_analysis['analysis']['eye_openness'],
+            'accommodation_state': gaze_analysis['analysis']['accommodation_state'],
+            'gaze_confidence': gaze_analysis['analysis']['confidence'],
+            'screen_visibility_ratio': gaze_analysis['analysis']['screen_visibility_ratio'],
+            'eye_condition_notes': gaze_analysis['analysis']['eye_condition_notes'],
+            'diagnostics': gaze_analysis['diagnostics'],
+            'model_vs_refined_agreement': gaze_analysis['model_vs_refined_agreement'],
+        }
+    
+    # Add iris metrics to response
+    if iris_metrics:
+        response['iris_metrics'] = iris_metrics
+        response.update(extract_iris_xy(iris_metrics))
     
     # Save prediction result with metrics
     save_inference_result(label, confidence, raw_label, iris_metrics, lazy_confidence,

@@ -10,6 +10,8 @@ const requireEyesCb = document.getElementById('requireEyes');
 const showMetricsCb = document.getElementById('showMetrics');
 const metricsPanel = document.getElementById('metricsPanel');
 const metricsText = document.getElementById('metricsText');
+const gazeAnalysisPanel = document.getElementById('gazeAnalysisPanel');
+const gazeAnalysisText = document.getElementById('gazeAnalysisText');
 const sessionLabelEl = document.getElementById('sessionLabel');
 const sessionCountEl = document.getElementById('sessionCount');
 
@@ -378,6 +380,13 @@ async function sendFrame(){
         if(debugText && data.all_probs){
           debugText.textContent = `probs: ${data.all_probs.map(p=>p.toFixed(4)).join(', ')}`;
         }
+
+        // Display gaze analysis if available
+        if(data.gaze_analysis){
+          updateGazeAnalysisPanel(data.gaze_analysis);
+        } else {
+          if(gazeAnalysisPanel) gazeAnalysisPanel.style.display = 'none';
+        }
       }
     }catch(e){
       log('Send error: ' + e.message);
@@ -460,6 +469,34 @@ function updateMetricsPanel(m){
     `Gaze ratio L/R: ${fmt(m.left.gazeX)} / ${fmt(m.right.gazeX)} (0=inner, 1=outer)`,
     `EAR L/R: ${fmt(m.left.ear)} / ${fmt(m.right.ear)} (blink if < ~0.20)`
   ].join('\n');
+}
+
+function updateGazeAnalysisPanel(gazeData){
+  if(!gazeAnalysisPanel || !gazeAnalysisText){ return; }
+  if(!gazeData){ gazeAnalysisPanel.style.display='none'; return; }
+  gazeAnalysisPanel.style.display = 'block';
+  
+  const lines = [
+    `📸 Gaze Direction: ${gazeData.gaze_direction}`,
+    `${gazeData.looking_at_screen ? '✓' : '✗'} Looking at screen: ${gazeData.looking_at_screen ? 'YES' : 'NO'} (visibility: ${(gazeData.screen_visibility_ratio*100).toFixed(0)}%)`,
+    `${gazeData.looking_at_camera ? '✓' : '✗'} Looking at camera: ${gazeData.looking_at_camera ? 'YES' : 'NO'}`,
+    `👁️  Eye openness: ${gazeData.eye_openness}`,
+    `🎯 Horizontal alignment: ${gazeData.horizontal_alignment}`,
+    `💪 Accommodation: ${gazeData.accommodation_state}`,
+    `💬 Notes: ${gazeData.eye_condition_notes}`,
+    `📊 Confidence: ${(gazeData.gaze_confidence*100).toFixed(0)}%`,
+  ];
+  
+  if(gazeData.diagnostics && gazeData.diagnostics.length){
+    lines.push('🔍 Diagnostics:');
+    gazeData.diagnostics.forEach(d => lines.push(`  • ${d}`));
+  }
+  
+  if(!gazeData.model_vs_refined_agreement){
+    lines.push('⚠️  Model prediction was refined based on gaze analysis');
+  }
+  
+  gazeAnalysisText.textContent = lines.join('\n');
 }
 
 // Toggle metrics panel visibility
