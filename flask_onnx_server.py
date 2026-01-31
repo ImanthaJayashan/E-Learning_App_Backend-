@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify, render_template
+from flask_cors import CORS
 import onnxruntime as ort
 from PIL import Image
 import numpy as np
@@ -11,6 +12,7 @@ from collections import deque
 from gaze_analysis import enhance_lazy_eye_detection
 
 app = Flask(__name__)
+CORS(app)
 
 # Minimum probability required to call a lazy_eye; below this we fall back to uncertain/normal.
 LAZY_THRESHOLD = 0.9
@@ -30,6 +32,9 @@ OUTPUT_NAME = ORT_SESSION.get_outputs()[0].name
 # Rolling window for temporal smoothing of probabilities
 SMOOTH_WINDOW = 5
 PROB_HISTORY = deque(maxlen=SMOOTH_WINDOW)
+
+# Keep the most recent inference in memory for quick dashboard access
+LAST_RESULT = None
 
 
 def preprocess_image_bytes(image_bytes, img_size=224):
@@ -71,7 +76,7 @@ def extract_iris_xy(iris_metrics):
 
 
 def save_inference_result(prediction_label, confidence, raw_label, iris_metrics=None, lazy_confidence=None,
-                          smooth_label=None, smooth_confidence=None, smooth_lazy_confidence=None):
+                          smooth_label=None, smooth_confidence=None, smooth_lazy_confidence=None, extra=None):
     """Save inference result with optional iris metrics to JSON."""
     try:
         results_file = Path('received_samples/inference_results.json')
@@ -87,6 +92,9 @@ def save_inference_result(prediction_label, confidence, raw_label, iris_metrics=
             'smooth_confidence': float(smooth_confidence) if smooth_confidence is not None else None,
             'smooth_lazy_eye_confidence': float(smooth_lazy_confidence) if smooth_lazy_confidence is not None else None,
         }
+
+        if extra and isinstance(extra, dict):
+            result.update(extra)
         
         if iris_metrics:
             result['iris_metrics'] = iris_metrics
@@ -110,6 +118,10 @@ def save_inference_result(prediction_label, confidence, raw_label, iris_metrics=
         # Save back
         with open(results_file, 'w') as f:
             json.dump(records, f, indent=2)
+
+        # Update in-memory cache for fast access
+        global LAST_RESULT
+        LAST_RESULT = result
     except Exception as e:
         print(f"Failed to save inference result: {e}")
 
@@ -266,9 +278,27 @@ def predict():
         response.update(extract_iris_xy(iris_metrics))
     
     # Save prediction result with metrics
-    save_inference_result(label, confidence, raw_label, iris_metrics, lazy_confidence,
-                          smooth_label=smooth_label, smooth_confidence=smooth_confidence,
-                          smooth_lazy_confidence=smooth_lazy_confidence)
+    response['timestamp'] = datetime.utcnow().isoformat()
+
+    save_inference_result(
+        label,
+        confidence,
+        raw_label,
+        iris_metrics,
+        lazy_confidence,
+        smooth_label=smooth_label,
+        smooth_confidence=smooth_confidence,
+        smooth_lazy_confidence=smooth_lazy_confidence,
+        extra={
+            'is_uncertain': is_uncertain,
+            'uncertainty_reason': uncertainty_reason,
+            'gaze_analysis': response.get('gaze_analysis'),
+        }
+    )
+
+    # Update in-memory cache for fast access
+    global LAST_RESULT
+    LAST_RESULT = response
 
     # optionally return the raw uploaded image as base64 when debug=1 is passed
     try:
@@ -280,6 +310,28 @@ def predict():
         pass
 
     return jsonify(response)
+
+
+@app.route('/latest', methods=['GET'])
+def latest():
+    # Return cached latest if available
+    if LAST_RESULT:
+        return jsonify(LAST_RESULT)
+
+    # Fallback to file storage
+    try:
+        results_file = Path('received_samples/inference_results.json')
+        if results_file.exists():
+            with open(results_file, 'r') as f:
+                data = json.load(f)
+                if isinstance(data, list) and len(data) > 0:
+                    return jsonify(data[-1])
+                if isinstance(data, dict) and 'records' in data and data['records']:
+                    return jsonify(data['records'][-1])
+    except Exception:
+        pass
+
+    return jsonify({'message': 'no results yet'}), 404
 
 
 if __name__ == '__main__':
