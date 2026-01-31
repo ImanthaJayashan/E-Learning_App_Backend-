@@ -7,9 +7,16 @@ import io
 import torch
 from pathlib import Path
 import json
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from collections import deque
 from gaze_analysis import enhance_lazy_eye_detection
+
+# Sri Lankan timezone (UTC+5:30)
+SRI_LANKA_TZ = timezone(timedelta(hours=5, minutes=30))
+
+def get_srilanka_time():
+    """Get current time in Sri Lankan timezone"""
+    return datetime.now(SRI_LANKA_TZ).isoformat()
 
 app = Flask(__name__)
 CORS(app)
@@ -83,7 +90,7 @@ def save_inference_result(prediction_label, confidence, raw_label, iris_metrics=
         results_file.parent.mkdir(exist_ok=True)
         
         result = {
-            'timestamp': datetime.utcnow().isoformat(),
+            'timestamp': get_srilanka_time(),
             'label': prediction_label,
             'raw_label': raw_label,
             'confidence': float(confidence),
@@ -278,7 +285,7 @@ def predict():
         response.update(extract_iris_xy(iris_metrics))
     
     # Save prediction result with metrics
-    response['timestamp'] = datetime.utcnow().isoformat()
+    response['timestamp'] = get_srilanka_time()
 
     save_inference_result(
         label,
