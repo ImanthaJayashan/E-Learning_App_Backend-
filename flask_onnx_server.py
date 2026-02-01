@@ -341,5 +341,100 @@ def latest():
     return jsonify({'message': 'no results yet'}), 404
 
 
+@app.route('/history', methods=['GET'])
+def history():
+    """
+    Get eye checking history with analytics for specified time period.
+    Query params:
+    - days: number of days to look back (7, 14, 21, or 'all'). Default: 7
+    """
+    try:
+        days_param = request.args.get('days', '7')
+        
+        results_file = Path('received_samples/inference_results.json')
+        if not results_file.exists():
+            return jsonify({
+                'records': [],
+                'daily_summary': {},
+                'total_checks': 0,
+                'period_days': 0
+            })
+        
+        # Load all records
+        with open(results_file, 'r') as f:
+            data = json.load(f)
+            records = data if isinstance(data, list) else data.get('records', [])
+        
+        # Filter by time period
+        now = datetime.now(SRI_LANKA_TZ)
+        if days_param.lower() != 'all':
+            try:
+                days = int(days_param)
+                cutoff = now - timedelta(days=days)
+                filtered_records = [
+                    r for r in records 
+                    if datetime.fromisoformat(r['timestamp']).replace(tzinfo=SRI_LANKA_TZ) >= cutoff
+                ]
+            except ValueError:
+                filtered_records = records
+        else:
+            filtered_records = records
+        
+        # Generate day-by-day summary
+        daily_summary = {}
+        for record in filtered_records:
+            try:
+                ts = datetime.fromisoformat(record['timestamp']).replace(tzinfo=SRI_LANKA_TZ)
+                day_key = ts.strftime('%Y-%m-%d')
+                
+                if day_key not in daily_summary:
+                    daily_summary[day_key] = {
+                        'date': day_key,
+                        'total_checks': 0,
+                        'normal_count': 0,
+                        'lazy_eye_count': 0,
+                        'avg_confidence': 0,
+                        'checks': []
+                    }
+                
+                daily_summary[day_key]['total_checks'] += 1
+                daily_summary[day_key]['checks'].append({
+                    'timestamp': record['timestamp'],
+                    'label': record.get('label', 'unknown'),
+                    'confidence': record.get('confidence', 0),
+                    'lazy_eye_confidence': record.get('lazy_eye_confidence')
+                })
+                
+                if record.get('label') == 'normal_eye':
+                    daily_summary[day_key]['normal_count'] += 1
+                elif record.get('label') == 'lazy_eye':
+                    daily_summary[day_key]['lazy_eye_count'] += 1
+                
+            except Exception:
+                continue
+        
+        # Calculate averages
+        for day_key in daily_summary:
+            day_data = daily_summary[day_key]
+            confidences = [c['confidence'] for c in day_data['checks']]
+            day_data['avg_confidence'] = sum(confidences) / len(confidences) if confidences else 0
+            day_data['status'] = 'normal' if day_data['normal_count'] > day_data['lazy_eye_count'] else 'attention_needed'
+        
+        # Sort by date
+        sorted_daily = sorted(daily_summary.values(), key=lambda x: x['date'], reverse=True)
+        
+        return jsonify({
+            'records': filtered_records,
+            'daily_summary': sorted_daily,
+            'total_checks': len(filtered_records),
+            'period_days': int(days_param) if days_param.lower() != 'all' else len(daily_summary),
+            'period_start': filtered_records[0]['timestamp'] if filtered_records else None,
+            'period_end': filtered_records[-1]['timestamp'] if filtered_records else None
+        })
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
