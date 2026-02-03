@@ -8,3 +8,5 @@ flask
 flask-cors
 onnxruntime
 numpy
+pymongo
+python-dotenv

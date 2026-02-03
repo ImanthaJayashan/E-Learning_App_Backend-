@@ -10,6 +10,25 @@ import json
 from datetime import datetime, timezone, timedelta
 from collections import deque
 from gaze_analysis import enhance_lazy_eye_detection
+from dotenv import load_dotenv
+import os
+
+# Load environment variables from .env file
+load_dotenv()
+
+try:
+    from game_routes import game_routes
+    GAME_ROUTES_AVAILABLE = True
+except ImportError:
+    GAME_ROUTES_AVAILABLE = False
+    print("⚠ Game routes not loaded. Install pymongo to enable game session storage.")
+
+try:
+    from vision_therapy_routes import api_routes
+    API_ROUTES_AVAILABLE = True
+except ImportError:
+    API_ROUTES_AVAILABLE = False
+    print("⚠ API routes not loaded. Install pymongo to enable comprehensive storage.")
 
 # Sri Lankan timezone (UTC+5:30)
 SRI_LANKA_TZ = timezone(timedelta(hours=5, minutes=30))
@@ -20,6 +39,16 @@ def get_srilanka_time():
 
 app = Flask(__name__)
 CORS(app)
+
+# Register game routes blueprint if available
+if GAME_ROUTES_AVAILABLE:
+    app.register_blueprint(game_routes)
+    print("✓ Game routes registered at /api/game")
+
+# Register comprehensive API routes if available
+if API_ROUTES_AVAILABLE:
+    app.register_blueprint(api_routes)
+    print("✓ Comprehensive API routes registered at /api")
 
 # Minimum probability required to call a lazy_eye; below this we fall back to uncertain/normal.
 LAZY_THRESHOLD = 0.9
