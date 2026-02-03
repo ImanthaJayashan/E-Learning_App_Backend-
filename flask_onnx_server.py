@@ -30,6 +30,12 @@ except ImportError:
     API_ROUTES_AVAILABLE = False
     print("⚠ API routes not loaded. Install pymongo to enable comprehensive storage.")
 
+try:
+    from vision_therapy_db import vision_db
+    VISION_DB_AVAILABLE = True
+except ImportError:
+    VISION_DB_AVAILABLE = False
+
 # Sri Lankan timezone (UTC+5:30)
 SRI_LANKA_TZ = timezone(timedelta(hours=5, minutes=30))
 
@@ -315,6 +321,28 @@ def predict():
     
     # Save prediction result with metrics
     response['timestamp'] = get_srilanka_time()
+
+    # Save to MongoDB if userId provided
+    try:
+        user_id = request.form.get('userId')
+        if user_id and VISION_DB_AVAILABLE:
+            vision_db.save_eye_detection_result({
+                'userId': user_id,
+                'result': label,
+                'raw_label': raw_label,
+                'confidence': confidence,
+                'lazy_eye_confidence': lazy_confidence,
+                'smooth_label': smooth_label,
+                'smooth_confidence': smooth_confidence,
+                'smooth_lazy_eye_confidence': smooth_lazy_confidence,
+                'is_uncertain': is_uncertain,
+                'uncertainty_reason': uncertainty_reason,
+                'gaze_analysis': response.get('gaze_analysis'),
+                'iris_metrics': iris_metrics,
+                'timestamp': response['timestamp'],
+            })
+    except Exception:
+        pass
 
     save_inference_result(
         label,
