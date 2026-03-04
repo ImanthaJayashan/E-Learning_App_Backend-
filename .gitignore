@@ -1,0 +1,17 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+checkpoints/
+eye_data/
+test/
+train/
+saved_model/
+model.onnx
+model.onnx.data
+*.pth
+*.h5
+.DS_Store
+.idea/
+.vscode/
+received_samples/

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Eye Scan - Real Time</title>
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body>
+    <div class="container">
+      <h1>Real-time Eye Scan</h1>
+      <div class="video-wrap">
+        <video id="video" autoplay playsinline></video>
+        <canvas id="overlay"></canvas>
+      </div>
+      <div class="controls">
+        <button id="startBtn">Start</button>
+        <button id="stopBtn" disabled>Stop</button>
+        <label>Interval(ms): <input id="interval" type="number" value="600" min="100" step="100"></label>
+        <label><input id="requireEyes" type="checkbox" checked> Require face & eyes to classify</label>
+        <label><input id="cropFace" type="checkbox" checked> Crop face region before sending</label>
+        <label><input id="sendDebug" type="checkbox"> Send debug image to server</label>
+        <label><input id="showMetrics" type="checkbox"> Show eye iris metrics</label>
+      </div>
+      <div id="result">Prediction: <span id="label">-</span> (<span id="conf">-</span>)</div>
+      <div id="sessionSummary" style="margin-top:6px;">
+        Session majority: <span id="sessionLabel">-</span> (<span id="sessionCount">0</span> votes)
+      </div>
+      <div id="metricsPanel" style="display:none;margin:8px 0 0 0;">
+        <pre id="metricsText" style="font-family:monospace;white-space:pre-wrap;margin:0"></pre>
+      </div>
+      <div id="gazeAnalysisPanel" style="display:none;margin:8px 0 0 0;padding:8px;background:#f0f8ff;border:1px solid #0066cc;border-radius:4px;">
+        <h3 style="margin:0 0 8px 0;color:#0066cc;">Gaze Analysis (Camera-Aware)</h3>
+        <div id="gazeAnalysisText" style="font-size:13px;font-family:monospace;white-space:pre-wrap;margin:0;line-height:1.4;"></div>
+      </div>
+        <div id="debugBox"></div>
+        <div id="debugText" style="font-family:monospace;white-space:pre;">Server debug output will appear here</div>
+      </div>
+      <div id="log"></div>
+    </div>
+
+    <!-- MediaPipe Face Mesh (via CDN) -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,551 @@
+const video = document.getElementById('video');
+const overlay = document.getElementById('overlay');
+const startBtn = document.getElementById('startBtn');
+const stopBtn = document.getElementById('stopBtn');
+const labelEl = document.getElementById('label');
+const confEl = document.getElementById('conf');
+const logEl = document.getElementById('log');
+const intervalInput = document.getElementById('interval');
+const requireEyesCb = document.getElementById('requireEyes');
+const showMetricsCb = document.getElementById('showMetrics');
+const metricsPanel = document.getElementById('metricsPanel');
+const metricsText = document.getElementById('metricsText');
+const gazeAnalysisPanel = document.getElementById('gazeAnalysisPanel');
+const gazeAnalysisText = document.getElementById('gazeAnalysisText');
+const sessionLabelEl = document.getElementById('sessionLabel');
+const sessionCountEl = document.getElementById('sessionCount');
+
+let stream = null;
+let timer = null;
+let faceMesh = null;
+let eyesDetected = false;
+let latestResults = null;
+let lastMetrics = null;
+// smoothing & debounce state
+const SMOOTH_WINDOW = 5; // number of recent predictions to average
+const CONSISTENT_REQUIRED = 3; // number of consecutive averaged-labels required to show
+const MIN_CONFIDENCE = 0.55; // minimum averaged confidence to accept
+const MIN_SEND_INTERVAL_MS = 200; // do not send more often than this
+let probsHistory = [];
+let lastAveragedLabel = null;
+let consistentCount = 0;
+let lastSendTime = 0;
+let sessionVotes = [];
+
+function log(msg){
+  const p = document.createElement('div');
+  p.textContent = msg;
+  logEl.prepend(p);
+}
+
+async function startCamera(){
+  try{
+    resetSessionVotes();
+    stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    video.srcObject = stream;
+    await video.play();
+    overlay.width = video.videoWidth;
+    overlay.height = video.videoHeight;
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+
+    initFaceMesh();
+    scheduleSend();
+  }catch(e){
+    log('Camera error: ' + e.message);
+  }
+}
+
+function stopCamera(){
+  if(stream){
+    stream.getTracks().forEach(t => t.stop());
+    stream = null;
+  }
+  if(timer){
+    clearTimeout(timer);
+    timer = null;
+  }
+  if(faceMesh){
+    faceMesh.close();
+    faceMesh = null;
+  }
+   finalizeSession();
+  startBtn.disabled = false;
+  stopBtn.disabled = true;
+}
+
+function scheduleSend(){
+  const ms = parseInt(intervalInput.value) || 600;
+  timer = setTimeout(sendFrame, ms);
+}
+
+function drawOverlay(text, results, metrics){
+  const ctx = overlay.getContext('2d');
+  ctx.clearRect(0,0,overlay.width, overlay.height);
+  if(results && results.multiFaceLandmarks){
+    // draw landmarks
+    ctx.fillStyle = 'rgba(255,0,0,0.8)';
+    results.multiFaceLandmarks.forEach(face => {
+      face.forEach(lm => {
+        const x = lm.x * overlay.width;
+        const y = lm.y * overlay.height;
+        ctx.fillRect(x-1, y-1, 2, 2);
+      });
+    });
+  }
+  // draw iris circles if metrics provided
+  if(metrics){
+    const ctx2 = ctx;
+    ctx2.strokeStyle = 'rgba(0,200,255,0.9)';
+    ctx2.lineWidth = 2;
+    if(metrics.left && metrics.left.center && metrics.left.r){
+      ctx2.beginPath();
+      ctx2.arc(metrics.left.center.x, metrics.left.center.y, metrics.left.r, 0, Math.PI*2);
+      ctx2.stroke();
+    }
+    if(metrics.right && metrics.right.center && metrics.right.r){
+      ctx2.beginPath();
+      ctx2.arc(metrics.right.center.x, metrics.right.center.y, metrics.right.r, 0, Math.PI*2);
+      ctx2.stroke();
+    }
+  }
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.fillRect(0, overlay.height - 40, overlay.width, 40);
+  ctx.fillStyle = '#fff';
+  ctx.font = '20px Arial';
+  ctx.fillText(text, 10, overlay.height - 12);
+}
+
+function hasEyes(results){
+  if(!results || !results.multiFaceLandmarks || results.multiFaceLandmarks.length === 0) return false;
+  // indices approximate as used in Python script
+  const left_eye_idx = [33,7,163,144,145,153,154,155,133];
+  const right_eye_idx = [263,249,390,373,374,380,381,382,362];
+  const face = results.multiFaceLandmarks[0];
+  let vis = 0;
+  const total = left_eye_idx.length + right_eye_idx.length;
+  left_eye_idx.concat(right_eye_idx).forEach(i => {
+    const lm = face[i];
+    if(lm && lm.x >= 0 && lm.x <= 1 && lm.y >= 0 && lm.y <=1) vis++;
+  });
+  return (vis / total) >= 0.3;
+}
+
+function initFaceMesh(){
+  if(typeof faceMesh !== 'undefined' && faceMesh) return;
+  const FaceMeshClass = window.FaceMesh || window.faceMesh || null;
+  if(!FaceMeshClass){
+    log('MediaPipe FaceMesh not loaded; falling back to sending frames without eye gating.');
+    return;
+  }
+
+  faceMesh = new FaceMeshClass({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+  });
+  faceMesh.setOptions({
+    maxNumFaces: 1,
+    refineLandmarks: true,
+    minDetectionConfidence: 0.5,
+    minTrackingConfidence: 0.5
+  });
+  faceMesh.onResults((results) => {
+    eyesDetected = hasEyes(results);
+    latestResults = results;
+    // compute iris metrics if requested
+    if(showMetricsCb && showMetricsCb.checked){
+      lastMetrics = computeIrisMetrics(results);
+      updateMetricsPanel(lastMetrics);
+    } else {
+      lastMetrics = null;
+      if(metricsPanel) metricsPanel.style.display = 'none';
+    }
+    const txt = eyesDetected ? 'Eyes detected' : 'No eyes detected';
+    drawOverlay(txt, results, lastMetrics);
+  });
+
+  // Use MediaPipe Camera util if available for better performance
+  const CameraClass = window.Camera || window.camera || null;
+  if(CameraClass){
+    try{
+      // width/height may not be available immediately; Camera handles sizing
+      const camera = new CameraClass(video, {
+        onFrame: async () => {
+          await faceMesh.send({image: video});
+        },
+        width: video.videoWidth || 640,
+        height: video.videoHeight || 480
+      });
+      camera.start();
+      // store camera so we can stop it on teardown
+      faceMesh._cameraInstance = camera;
+    }catch(e){
+      // fallback to manual loop if Camera util fails
+      async function faceLoop(){
+        if(!stream || !faceMesh) return;
+        try{ await faceMesh.send({image: video}); }catch(e){}
+        requestAnimationFrame(faceLoop);
+      }
+      requestAnimationFrame(faceLoop);
+    }
+  }else{
+    // manual loop
+    async function faceLoop(){
+      if(!stream || !faceMesh) return;
+      try{ await faceMesh.send({image: video}); }catch(e){}
+      requestAnimationFrame(faceLoop);
+    }
+    requestAnimationFrame(faceLoop);
+  }
+}
+
+async function sendFrame(){
+  if(!stream) return;
+  // If requireEyes is checked and FaceMesh is available, only send when eyesDetected
+  const requireEyes = requireEyesCb ? requireEyesCb.checked : true;
+  if(requireEyes && typeof faceMesh !== 'undefined' && faceMesh && !eyesDetected){
+    // update UI and schedule next
+    labelEl.textContent = '-';
+    confEl.textContent = '-';
+    drawOverlay('No face/eyes detected — no result');
+    scheduleSend();
+    return;
+  }
+
+  const canvas = document.createElement('canvas');
+  const cropFace = document.getElementById('cropFace') ? document.getElementById('cropFace').checked : true;
+  let sx = 0, sy = 0, sw = video.videoWidth, sh = video.videoHeight;
+  if(latestResults && latestResults.multiFaceLandmarks && latestResults.multiFaceLandmarks.length){
+    const face = latestResults.multiFaceLandmarks[0];
+    // compute face bbox
+    const xs = face.map(lm => lm.x * video.videoWidth);
+    const ys = face.map(lm => lm.y * video.videoHeight);
+    const minX = Math.max(Math.min(...xs) - 20, 0);
+    const maxX = Math.min(Math.max(...xs) + 20, video.videoWidth);
+    const minY = Math.max(Math.min(...ys) - 20, 0);
+    const maxY = Math.min(Math.max(...ys) + 20, video.videoHeight);
+    const faceBox = { x: Math.floor(minX), y: Math.floor(minY), w: Math.floor(maxX - minX), h: Math.floor(maxY - minY) };
+
+    // prefer a tighter eye-region crop when possible (eyes give most signal for lazy-eye)
+    try{
+      const left_eye_idx = [33,7,163,144,145,153,154,155,133];
+      const right_eye_idx = [263,249,390,373,374,380,381,382,362];
+      const eyeIndices = left_eye_idx.concat(right_eye_idx);
+      const ex = [];
+      const ey = [];
+      eyeIndices.forEach(i => {
+        const lm = face[i];
+        if(lm){ ex.push(lm.x * video.videoWidth); ey.push(lm.y * video.videoHeight); }
+      });
+      if(ex.length && ey.length){
+        const eMinX = Math.max(Math.min(...ex) - 30, 0);
+        const eMaxX = Math.min(Math.max(...ex) + 30, video.videoWidth);
+        const eMinY = Math.max(Math.min(...ey) - 20, 0);
+        const eMaxY = Math.min(Math.max(...ey) + 20, video.videoHeight);
+        const eyeBox = { x: Math.floor(eMinX), y: Math.floor(eMinY), w: Math.floor(eMaxX - eMinX), h: Math.floor(eMaxY - eMinY) };
+        // use eyeBox when it's reasonably sized compared to face box (avoid tiny crops)
+        if(eyeBox.w > 30 && eyeBox.h > 20){
+          sx = eyeBox.x; sy = eyeBox.y; sw = eyeBox.w; sh = eyeBox.h;
+        } else {
+          // fallback to face box when eye region too small
+          if(cropFace){ sx = faceBox.x; sy = faceBox.y; sw = faceBox.w; sh = faceBox.h; }
+        }
+      } else {
+        if(cropFace){ sx = faceBox.x; sy = faceBox.y; sw = faceBox.w; sh = faceBox.h; }
+      }
+    }catch(e){
+      // if any issue using landmarks, fallback to face crop or full frame
+      if(cropFace){ sx = faceBox.x; sy = faceBox.y; sw = faceBox.w; sh = faceBox.h; }
+    }
+    // if box too small, fallback to full frame
+    if(sw < 20 || sh < 20){ sx = 0; sy = 0; sw = video.videoWidth; sh = video.videoHeight; }
+  }
+
+  canvas.width = sw;
+  canvas.height = sh;
+  const ctx = canvas.getContext('2d');
+  try{
+    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
+  }catch(e){
+    // fallback to full frame draw
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  }
+
+    // Resize the crop to model input size before sending to server to match training preprocessing
+    const MODEL_IMG_SIZE = 224;
+    const resizeCanvas = document.createElement('canvas');
+    resizeCanvas.width = MODEL_IMG_SIZE;
+    resizeCanvas.height = MODEL_IMG_SIZE;
+    const rctx = resizeCanvas.getContext('2d');
+    rctx.drawImage(canvas, 0, 0, canvas.width, canvas.height, 0, 0, MODEL_IMG_SIZE, MODEL_IMG_SIZE);
+
+    resizeCanvas.toBlob(async function(blob){
+    try{
+      const fd = new FormData();
+      // send face crop with original video bbox metadata so server could optionally align
+      fd.append('image', blob, 'frame.jpg');
+        // send iris metrics if available
+        if(lastMetrics){
+          fd.append('iris_metrics', JSON.stringify(lastMetrics));
+        }
+      // include bbox coordinates to server (optional)
+      if(!(sx === 0 && sy === 0 && sw === video.videoWidth && sh === video.videoHeight)){
+        fd.append('bbox', JSON.stringify({sx, sy, sw, sh, vw: video.videoWidth, vh: video.videoHeight}));
+      }
+      const sendDebug = document.getElementById('sendDebug') ? document.getElementById('sendDebug').checked : false;
+      const url = sendDebug ? '/predict?debug=1' : '/predict';
+          // throttle send frequency to avoid network overload and noisy frames
+          const now = Date.now();
+          if(now - lastSendTime < MIN_SEND_INTERVAL_MS){
+            // skip this send; schedule next
+            scheduleSend();
+            return;
+          }
+          lastSendTime = now;
+          const res = await fetch(url, { method: 'POST', body: fd });
+      if(!res.ok){
+        const txt = await res.text();
+        log('Server error: ' + txt);
+      } else {
+        const data = await res.json();
+        // push probs into history for smoothing
+        if(data.all_probs && Array.isArray(data.all_probs)){
+          probsHistory.push(data.all_probs.map(p=>Number(p)));
+          if(probsHistory.length > SMOOTH_WINDOW) probsHistory.shift();
+        }
+
+        // compute average probs over history
+        let averaged = null;
+        if(probsHistory.length){
+          const L = probsHistory[0].length;
+          const sums = new Array(L).fill(0);
+          probsHistory.forEach(arr => {
+            for(let i=0;i<L;i++) sums[i] += arr[i];
+          });
+          averaged = sums.map(s => s / probsHistory.length);
+        }
+
+        let displayLabel = '-';
+        let displayConf = 0.0;
+        if(averaged){
+          // find argmax
+          let maxIdx = 0; let maxVal = averaged[0];
+          for(let i=1;i<averaged.length;i++){ if(averaged[i] > maxVal){ maxVal = averaged[i]; maxIdx = i; } }
+          // debounce: require repeated averaged label
+          const avgLabel = data.label || ('class_' + maxIdx);
+          if(lastAveragedLabel === avgLabel){
+            consistentCount += 1;
+          } else {
+            lastAveragedLabel = avgLabel;
+            consistentCount = 1;
+          }
+          displayLabel = (consistentCount >= CONSISTENT_REQUIRED && maxVal >= MIN_CONFIDENCE) ? avgLabel : '-';
+          displayConf = maxVal;
+        } else {
+          // fallback to immediate single-frame result
+          displayLabel = data.label || '-';
+          displayConf = data.confidence || 0.0;
+        }
+
+        // update UI
+        labelEl.textContent = displayLabel;
+        confEl.textContent = displayConf ? displayConf.toFixed(3) : '-';
+        drawOverlay(
+          displayLabel === '-' ? 'Waiting for stable result...' : `${displayLabel} (${(displayConf*100).toFixed(1)}%)`,
+          latestResults,
+          lastMetrics
+        );
+
+        // record vote for session majority if we have a valid label
+        if(displayLabel && displayLabel !== '-'){
+          sessionVotes.push({label: displayLabel, conf: displayConf || 0});
+          updateSessionSummaryLive();
+        }
+
+        // display debug image and logits if present
+        const debugBox = document.getElementById('debugBox');
+        const debugText = document.getElementById('debugText');
+        if(debugBox){
+          if(data.debug_image_b64){
+            debugBox.innerHTML = '';
+            const img = document.createElement('img');
+            img.src = 'data:image/jpeg;base64,' + data.debug_image_b64;
+            img.style.maxWidth = '200px';
+            img.style.maxHeight = '200px';
+            img.style.border = '1px solid #ccc';
+            debugBox.appendChild(img);
+          }
+        }
+        if(debugText && data.all_probs){
+          debugText.textContent = `probs: ${data.all_probs.map(p=>p.toFixed(4)).join(', ')}`;
+        }
+
+        // Display gaze analysis if available
+        if(data.gaze_analysis){
+          updateGazeAnalysisPanel(data.gaze_analysis);
+        } else {
+          if(gazeAnalysisPanel) gazeAnalysisPanel.style.display = 'none';
+        }
+      }
+    }catch(e){
+      log('Send error: ' + e.message);
+    } finally {
+      scheduleSend();
+    }
+  }, 'image/jpeg', 0.8);
+}
+
+startBtn.addEventListener('click', startCamera);
+stopBtn.addEventListener('click', stopCamera);
+
+// automatically size overlay when video metadata loads
+video.addEventListener('loadedmetadata', ()=>{
+  overlay.width = video.videoWidth;
+  overlay.height = video.videoHeight;
+});
+
+function dist(a,b){ const dx=a.x-b.x, dy=a.y-b.y; return Math.hypot(dx,dy); }
+
+// Compute iris centers/radii, IPD, gaze ratios, and simple EAR per eye
+function computeIrisMetrics(results){
+  if(!results || !results.multiFaceLandmarks || !results.multiFaceLandmarks.length) return null;
+  const face = results.multiFaceLandmarks[0];
+  const W = overlay.width, H = overlay.height;
+  const px = (pt)=>({x: pt.x*W, y: pt.y*H});
+
+  const idx = {
+    lIris:[468,469,470,471,472], rIris:[473,474,475,476,477],
+    lOuter:33, lInner:133, lUp:159, lLow:145,
+    rInner:263, rOuter:362, rUp:386, rLow:374
+  };
+
+  const lIrisPts = idx.lIris.map(i=>px(face[i])).filter(Boolean);
+  const rIrisPts = idx.rIris.map(i=>px(face[i])).filter(Boolean);
+  if(!lIrisPts.length || !rIrisPts.length) return null;
+
+  const centerAndR = (pts)=>{
+    const c = {x: pts.reduce((s,p)=>s+p.x,0)/pts.length, y: pts.reduce((s,p)=>s+p.y,0)/pts.length};
+    const r = pts.reduce((s,p)=> s + Math.hypot(p.x-c.x,p.y-c.y), 0)/pts.length;
+    return {center:c, r};
+  };
+
+  const l = centerAndR(lIrisPts);
+  const r = centerAndR(rIrisPts);
+
+  const lOuter = px(face[idx.lOuter]);
+  const lInner = px(face[idx.lInner]);
+  const rInner = px(face[idx.rInner]);
+  const rOuter = px(face[idx.rOuter]);
+  const lUp = px(face[idx.lUp]);
+  const lLow = px(face[idx.lLow]);
+  const rUp = px(face[idx.rUp]);
+  const rLow = px(face[idx.rLow]);
+
+  const lWidth = dist(lOuter, lInner);
+  const rWidth = dist(rOuter, rInner);
+  const lEAR = lWidth>0 ? dist(lUp, lLow)/lWidth : 0;
+  const rEAR = rWidth>0 ? dist(rUp, rLow)/rWidth : 0;
+  const ipd = dist(l.center, r.center);
+  const lGaze = lWidth>0 ? (l.center.x - lInner.x)/lWidth : 0.5;
+  const rGaze = rWidth>0 ? (r.center.x - rInner.x)/rWidth : 0.5;
+
+  return {
+    left: { center: l.center, r: l.r, width: lWidth, ear: lEAR, gazeX: lGaze },
+    right:{ center: r.center, r: r.r, width: rWidth, ear: rEAR, gazeX: rGaze },
+    ipd
+  };
+}
+
+function updateMetricsPanel(m){
+  if(!metricsPanel || !metricsText){ return; }
+  if(!m){ metricsPanel.style.display='none'; return; }
+  metricsPanel.style.display = 'block';
+  const fmt = (n)=> (n!=null && isFinite(n)) ? n.toFixed(2) : '-';
+  metricsText.textContent = [
+    `Left iris: cx=${fmt(m.left.center.x)}, cy=${fmt(m.left.center.y)}, r=${fmt(m.left.r)}`,
+    `Right iris: cx=${fmt(m.right.center.x)}, cy=${fmt(m.right.center.y)}, r=${fmt(m.right.r)}`,
+    `IPD (px): ${fmt(m.ipd)}`,
+    `Gaze ratio L/R: ${fmt(m.left.gazeX)} / ${fmt(m.right.gazeX)} (0=inner, 1=outer)`,
+    `EAR L/R: ${fmt(m.left.ear)} / ${fmt(m.right.ear)} (blink if < ~0.20)`
+  ].join('\n');
+}
+
+function updateGazeAnalysisPanel(gazeData){
+  if(!gazeAnalysisPanel || !gazeAnalysisText){ return; }
+  if(!gazeData){ gazeAnalysisPanel.style.display='none'; return; }
+  gazeAnalysisPanel.style.display = 'block';
+  
+  const lines = [
+    `📸 Gaze Direction: ${gazeData.gaze_direction}`,
+    `${gazeData.looking_at_screen ? '✓' : '✗'} Looking at screen: ${gazeData.looking_at_screen ? 'YES' : 'NO'} (visibility: ${(gazeData.screen_visibility_ratio*100).toFixed(0)}%)`,
+    `${gazeData.looking_at_camera ? '✓' : '✗'} Looking at camera: ${gazeData.looking_at_camera ? 'YES' : 'NO'}`,
+    `👁️  Eye openness: ${gazeData.eye_openness}`,
+    `🎯 Horizontal alignment: ${gazeData.horizontal_alignment}`,
+    `💪 Accommodation: ${gazeData.accommodation_state}`,
+    `💬 Notes: ${gazeData.eye_condition_notes}`,
+    `📊 Confidence: ${(gazeData.gaze_confidence*100).toFixed(0)}%`,
+  ];
+  
+  if(gazeData.diagnostics && gazeData.diagnostics.length){
+    lines.push('🔍 Diagnostics:');
+    gazeData.diagnostics.forEach(d => lines.push(`  • ${d}`));
+  }
+  
+  if(!gazeData.model_vs_refined_agreement){
+    lines.push('⚠️  Model prediction was refined based on gaze analysis');
+  }
+  
+  gazeAnalysisText.textContent = lines.join('\n');
+}
+
+// Toggle metrics panel visibility
+if(showMetricsCb){
+  showMetricsCb.addEventListener('change', ()=>{
+    if(!showMetricsCb.checked){
+      lastMetrics = null;
+      if(metricsPanel) metricsPanel.style.display='none';
+    }
+  });
+}
+
+function resetSessionVotes(){
+  sessionVotes = [];
+  if(sessionLabelEl) sessionLabelEl.textContent = '-';
+  if(sessionCountEl) sessionCountEl.textContent = '0';
+}
+
+function finalizeSession(){
+  if(!sessionVotes.length){
+    if(sessionLabelEl) sessionLabelEl.textContent = 'No detections';
+    if(sessionCountEl) sessionCountEl.textContent = '0';
+    return;
+  }
+  const majority = computeMajority(sessionVotes);
+  if(sessionLabelEl) sessionLabelEl.textContent = majority.label;
+  if(sessionCountEl) sessionCountEl.textContent = String(majority.count);
+}
+
+function updateSessionSummaryLive(){
+  if(!sessionVotes.length) return;
+  const majority = computeMajority(sessionVotes);
+  if(sessionLabelEl) sessionLabelEl.textContent = majority.label;
+  if(sessionCountEl) sessionCountEl.textContent = String(majority.count);
+}
+
+function computeMajority(votes){
+  const tally = new Map();
+  votes.forEach(v => {
+    const prev = tally.get(v.label) || {count:0, conf:0};
+    prev.count += 1;
+    prev.conf += v.conf || 0;
+    tally.set(v.label, prev);
+  });
+  let best = {label:'-', count:0, conf:0};
+  tally.forEach((val, key) => {
+    if(val.count > best.count || (val.count === best.count && val.conf > best.conf)){
+      best = {label:key, count:val.count, conf:val.conf};
+    }
+  });
+  return best;
+}

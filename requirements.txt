@@ -1,0 +1,12 @@
+torch
+torchvision
+tqdm
+Pillow
+opencv-python
+mediapipe
+flask
+flask-cors
+onnxruntime
+numpy
+pymongo
+python-dotenv
